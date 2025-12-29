@@ -17,12 +17,18 @@ camera_mode = "static"  # "static" or "free"
 camera_distance = 600
 
 # Game state
-game_state = "menu"  # "menu", "element_select", "level_select", "playing", "game_over"
+game_state = "menu"  # "menu", "mode_select", "element_select", "level_select", "playing", "game_over"
+game_mode = "pvp"  # "pvp" or "pvai"
 current_turn = 1  # 1 or 2
 phase = "attack"  # "attack", "defend", "resolution"
 winner = 0
 round_number = 1
 level = "easy"  # "easy", "medium", "hard"
+
+# AI variables
+ai_decision_timer = 0
+ai_reaction_delay = 0.8  # Current reaction delay for defense (randomized per attack)
+ai_executing = False
 
 # Player data
 player1 = {
@@ -50,7 +56,9 @@ player2 = {
     "attack_type": "basic",
     "move_speed": 40,
     "jump_height": 0,
-    "vel": 0
+    "vel": 0,
+    "ai_target_x": None,
+    "ai_moving": False
 }
 
 # Element colors and names
@@ -124,6 +132,7 @@ def initialize_game():
     global player1, player2, game_state, current_turn, active_attack, winner
     global round_number, phase, danger_zone_timer
     global active_watchtower, watchtower_bullet, watchtower_bullet2, watchtower_cooldown
+    global ai_decision_timer, ai_executing
     
     player1["hp"] = 100
     player1["st"] = 0
@@ -144,8 +153,15 @@ def initialize_game():
     player2["move_speed"] = 40
     player2["jump_height"] = 0
     player2["vel"] = 0
+    player2["ai_target_x"] = None
+    player2["ai_moving"] = False
     
-    current_turn = random.randint(1, 2)
+    # In AI mode, player 1 always goes first
+    if game_mode == "pvai":
+        current_turn = 1
+    else:
+        current_turn = random.randint(1, 2)
+    
     active_attack = None
     winner = 0
     round_number = 1
@@ -156,6 +172,8 @@ def initialize_game():
     watchtower_bullet = None
     watchtower_bullet2 = None
     watchtower_cooldown = 0
+    ai_decision_timer = 0
+    ai_executing = False
     reset_crosshair()
     
     # Initialize danger zone for medium difficulty
@@ -648,7 +666,7 @@ def draw_attack(attack):
             glPopMatrix()
         
     elif attack["type"] == "ultimate":
-        # Three rectangles, one in front of the other
+        # Three tapered quads (narrow at front, wider at back)
         rect_configs = [
             {"y_offset": 0, "width": 180, "depth": 100, "height": 25, "brightness": 1.0},     # Largest
             {"y_offset": 50, "width": 140, "depth": 80, "height": 20, "brightness": 0.75},    # Medium
@@ -659,7 +677,8 @@ def draw_attack(attack):
             glPushMatrix()
             glTranslatef(0, config["y_offset"], 0)
             
-            w = config["width"] / 2
+            w_back = config["width"] / 2      # Back width 
+            w_front = config["width"] / 3     # Front width narrower
             d = config["depth"] / 2
             h = config["height"]
             
@@ -667,41 +686,41 @@ def draw_attack(attack):
             
             glBegin(GL_QUADS)
             
-            # Top face
-            glVertex3f(-w, -d, h)
-            glVertex3f(w, -d, h)
-            glVertex3f(w, d, h)
-            glVertex3f(-w, d, h)
+            # Top face (tapered)
+            glVertex3f(-w_back, -d, h)
+            glVertex3f(w_back, -d, h)
+            glVertex3f(w_front, d, h)
+            glVertex3f(-w_front, d, h)
             
-            # Bottom face
-            glVertex3f(-w, -d, 0)
-            glVertex3f(w, -d, 0)
-            glVertex3f(w, d, 0)
-            glVertex3f(-w, d, 0)
+            # Bottom face (tapered)
+            glVertex3f(-w_back, -d, 0)
+            glVertex3f(w_back, -d, 0)
+            glVertex3f(w_front, d, 0)
+            glVertex3f(-w_front, d, 0)
             
-            # Front face
-            glVertex3f(-w, d, 0)
-            glVertex3f(w, d, 0)
-            glVertex3f(w, d, h)
-            glVertex3f(-w, d, h)
+            # Front face (narrow end)
+            glVertex3f(-w_front, d, 0)
+            glVertex3f(w_front, d, 0)
+            glVertex3f(w_front, d, h)
+            glVertex3f(-w_front, d, h)
             
-            # Back face
-            glVertex3f(-w, -d, 0)
-            glVertex3f(w, -d, 0)
-            glVertex3f(w, -d, h)
-            glVertex3f(-w, -d, h)
+            # Back face (wide end)
+            glVertex3f(-w_back, -d, 0)
+            glVertex3f(w_back, -d, 0)
+            glVertex3f(w_back, -d, h)
+            glVertex3f(-w_back, -d, h)
             
-            # Left face
-            glVertex3f(-w, -d, 0)
-            glVertex3f(-w, d, 0)
-            glVertex3f(-w, d, h)
-            glVertex3f(-w, -d, h)
+            # Left face (tapered)
+            glVertex3f(-w_back, -d, 0)
+            glVertex3f(-w_front, d, 0)
+            glVertex3f(-w_front, d, h)
+            glVertex3f(-w_back, -d, h)
             
-            # Right face
-            glVertex3f(w, -d, 0)
-            glVertex3f(w, d, 0)
-            glVertex3f(w, d, h)
-            glVertex3f(w, -d, h)
+            # Right face (tapered)
+            glVertex3f(w_back, -d, 0)
+            glVertex3f(w_front, d, 0)
+            glVertex3f(w_front, d, h)
+            glVertex3f(w_back, -d, h)
             
             glEnd()
             glPopMatrix()
@@ -781,20 +800,38 @@ def fire_attack():
     attack_travel_time = 0
     attack_progress = 0
     
-    # Start camera animation from attacker to defender
+    # Start camera animation from attacker to defender (only in PvP mode)
     global camera_animating, camera_anim_progress, camera_start_y, camera_target_y
     global camera_start_look_y, camera_target_look_y
     
-    camera_animating = True
-    camera_anim_progress = 0
-    
-    # Set camera start position (behind attacker)
-    camera_start_y = -700 if current_turn == 1 else 700
-    camera_start_look_y = 200 if current_turn == 1 else -200
-    
-    # Set camera target position (behind defender)
-    camera_target_y = 700 if current_turn == 1 else -700
-    camera_target_look_y = -200 if current_turn == 1 else 200
+    if game_mode == "pvp":
+        camera_animating = True
+        camera_anim_progress = 0
+        
+        # Set camera start position (behind attacker)
+        camera_start_y = -700 if current_turn == 1 else 700
+        camera_start_look_y = 200 if current_turn == 1 else -200
+        
+        # Set camera target position (behind defender)
+        camera_target_y = 700 if current_turn == 1 else -700
+        camera_target_look_y = -200 if current_turn == 1 else 200
+    else:
+        # In AI mode, camera stays behind player 1
+        camera_animating = False
+        
+        # Set random AI reaction time if player 1 is attacking
+        if current_turn == 1:
+            global ai_reaction_delay
+            # Random reaction time: 0.2s (fast) to 1.5s (slow/too late)
+            # Distribution: 40% fast (0.2-0.6s), 40% medium (0.6-1.0s), 20% slow (1.0-1.5s)
+            rand = random.random()
+            if rand < 0.4:
+                ai_reaction_delay = random.uniform(0.2, 0.6)  # Fast reaction
+            elif rand < 0.8:
+                ai_reaction_delay = random.uniform(0.6, 1.0)  # Medium reaction
+            else:
+                ai_reaction_delay = random.uniform(1.0, 1.5)  # Slow reaction (might get hit)
+            print(f"AI reaction time set to: {ai_reaction_delay:.2f}s")
     
     # Switch to defend phase (but don't move attack yet - wait for animation)
     phase = "defend"
@@ -869,6 +906,102 @@ def fire_watchtower_bullet():
     
     watchtower_bullet2_progress = 0
     print(f"Non-active watchtower fired at random! From: ({tower2_x}, {tower2_y}, {tower2_z}) To: ({target2_x:.1f}, {target2_y:.1f}, {target2_z:.1f})")
+
+def ai_make_attack_decision():
+    """AI decides which attack type to use and fires at player 1"""
+    global ai_executing
+    
+    ai_player = player2
+    target_player = player1
+    
+    # AI decision logic for attack type (easy difficulty)
+    # 70% basic, 20% signature, 10% ultimate (if enough stamina)
+    attack_choice = random.random()
+    
+    if ai_player["st"] >= 100 and attack_choice > 0.9:
+        ai_player["attack_type"] = "ultimate"
+        print("AI chose ULTIMATE attack")
+    elif ai_player["st"] >= 20 and attack_choice > 0.7:
+        ai_player["attack_type"] = "signature"
+        print("AI chose SIGNATURE attack")
+    else:
+        ai_player["attack_type"] = "basic"
+        print("AI chose BASIC attack")
+    
+    reset_crosshair()
+    
+    # Calculate target with inaccuracy
+    # Easy difficulty: ±30 to ±80 pixel random offset
+    inaccuracy_x = random.uniform(-80, 80)
+    target_x = target_player["pos"][0] + inaccuracy_x
+    
+    # Clamp to crosshair range
+    max_range = ARENA_WIDTH - 50
+    target_x = max(-max_range, min(max_range, target_x))
+    
+    # Set crosshair to target position
+    global crosshair_pos
+    crosshair_pos = target_x
+    
+    print(f"AI targeting: {target_x:.1f} (player at {target_player['pos'][0]:.1f}, offset: {inaccuracy_x:.1f})")
+    
+    # Fire the attack
+    fire_attack()
+    ai_executing = False
+
+def ai_make_defense_decision():
+    """AI calculates attack trajectory and dodges"""
+    global ai_executing
+    
+    if not active_attack:
+        ai_executing = False
+        return
+    
+    ai_player = player2
+    
+    # Calculate where the attack is heading
+    attack_target_x = active_attack["target_x"]
+    
+    # Calculate dodge direction (move away from attack)
+    current_x = ai_player["pos"][0]
+    
+    # Determine which direction to dodge
+    if attack_target_x > current_x:
+        # Attack is to the right, dodge left
+        dodge_direction = -1
+    else:
+        # Attack is to the left, dodge right
+        dodge_direction = 1
+    
+    # Random dodge distance for easy difficulty (100-200 pixels)
+    dodge_distance = random.uniform(100, 200)
+    
+    # Calculate target position
+    target_x = current_x + (dodge_direction * dodge_distance)
+    
+    # Clamp to arena bounds
+    max_x = ARENA_WIDTH - 50
+    min_x = -ARENA_WIDTH + 50
+    
+    # If target is out of bounds, reverse direction
+    if target_x > max_x or target_x < min_x:
+        dodge_direction = -dodge_direction
+        target_x = current_x + (dodge_direction * dodge_distance)
+        # Clamp again to ensure it's within bounds
+        target_x = max(min_x, min(max_x, target_x))
+    
+    # Set target for smooth movement instead of teleporting
+    ai_player["ai_target_x"] = target_x
+    ai_player["ai_moving"] = True
+    
+    print(f"AI dodging from {current_x:.1f} to {target_x:.1f} (distance: {dodge_distance:.1f})")
+    
+    # Small chance to jump (20%)
+    if random.random() < 0.2 and ai_player["jump_height"] == 0:
+        ai_player["vel"] = 600  # Use proper initial velocity like player jumps
+        print("AI jumped while dodging")
+    
+    ai_executing = False
 
 def update_crosshair(dt):
     """Update crosshair oscillation"""
@@ -1078,10 +1211,15 @@ def switch_turn():
     """Switch to other player's turn"""
     global current_turn, phase, attack_timer, round_number
     global active_watchtower, watchtower_bullet, watchtower_bullet2, watchtower_cooldown
+    global ai_decision_timer, ai_executing
     
     current_turn = 2 if current_turn == 1 else 1
     phase = "attack"
     attack_timer = 0
+    
+    # Reset AI variables
+    ai_decision_timer = 0
+    ai_executing = False
     
     # Reset watchtower
     active_watchtower = None
@@ -1142,7 +1280,7 @@ def parry_attack():
 
 def keyboardListener(key, x, y):
     """Handle keyboard input"""
-    global pause, cheat_mode, game_state, camera_mode, current_turn, level
+    global pause, cheat_mode, game_state, camera_mode, current_turn, level, game_mode
     
     if key == b'p':
         pause = not pause
@@ -1150,7 +1288,7 @@ def keyboardListener(key, x, y):
     
     if key == b'l':
         if game_state == "game_over":
-            game_state = "element_select"
+            game_state = "mode_select"
             player1["element"] = None
             player2["element"] = None
         return
@@ -1160,6 +1298,18 @@ def keyboardListener(key, x, y):
         return
     
     if pause:
+        return
+    
+    # Mode selection
+    if game_state == "mode_select":
+        if key == b'1':
+            game_mode = "pvp"
+            game_state = "element_select"
+            print("Player vs Player mode selected")
+        elif key == b'2':
+            game_mode = "pvai"
+            game_state = "element_select"
+            print("Player vs AI mode selected")
         return
     
     # Element selection
@@ -1193,8 +1343,12 @@ def keyboardListener(key, x, y):
     
     if game_state != "playing":
         if key == b'\r':  # Enter key
-            game_state = "element_select"
+            game_state = "mode_select"
         return
+    
+    # In AI mode, only allow player 1 to control during their turn or defense
+    if game_mode == "pvai" and current_turn == 2 and phase == "attack":
+        return  # Don't allow input during AI's attack phase
     
     attacker = player1 if current_turn == 1 else player2
     defender = player2 if current_turn == 1 else player1
@@ -1238,6 +1392,11 @@ def keyboardListener(key, x, y):
     
     # Defend phase controls
     elif phase == "defend":
+        # In AI mode, only allow player 1 to defend when it's their turn
+        if game_mode == "pvai" and current_turn == 1:
+            # AI is defending, player can't control
+            return
+        
         # Movement - adjust direction based on which player is defending
         if key == b'a':
             # Player 1 moves left (negative X), Player 2 moves right (positive X) from their perspective
@@ -1295,8 +1454,13 @@ def setupCamera():
     glLoadIdentity()
     
     if camera_mode == "static":
-        # Handle camera animation
-        if camera_animating:
+        # In AI mode, always stay behind player 1
+        if game_mode == "pvai":
+            gluLookAt(0, -700, 250,
+                      0, 200, 60,
+                      0, 0, 1)
+        # Handle camera animation in PvP mode
+        elif camera_animating:
             # Interpolate camera position during animation
             t = camera_anim_progress  # 0 to 1
             # Smooth easing (ease-in-out)
@@ -1329,11 +1493,55 @@ def setupCamera():
         gluLookAt(cam_x, cam_y, camera_pos[2],
                   0, 0, 50,
                   0, 0, 1)
+def update_ai(dt):
+    """Unified AI logic for decisions and movement"""
+    global ai_decision_timer, ai_executing
+    
+    # 1. AI MOVEMENT LOGIC (Handles smooth sliding)
+    if player2["ai_moving"] and player2["ai_target_x"] is not None:
+        current_x = player2["pos"][0]
+        target_x = player2["ai_target_x"]
+        distance = abs(target_x - current_x)
+        
+        # Move 300 pixels per second
+        step = 300 * dt
+        
+        if distance < step:
+            # Arrived at target
+            player2["pos"][0] = target_x
+            player2["ai_moving"] = False
+            player2["ai_target_x"] = None
+        else:
+            # Move towards target
+            direction = 1 if target_x > current_x else -1
+            player2["pos"][0] += step * direction
+
+    # 2. AI DECISION LOGIC (Handles attacking and dodging)
+    # Only run if not already executing an action
+    if ai_executing:
+        return
+
+    # AI Attacks (when it is player 2's turn)
+    if current_turn == 2 and phase == "attack":
+        ai_decision_timer += dt
+        if ai_decision_timer >= 0.8:  # Fixed delay for attack decisions
+            ai_executing = True
+            ai_decision_timer = 0
+            ai_make_attack_decision()
+            
+    # AI Defends (when player 1 is attacking and attack is active)
+    elif current_turn == 1 and phase == "defend" and active_attack and not camera_animating:
+        ai_decision_timer += dt
+        if ai_decision_timer >= ai_reaction_delay:  # Dynamic delay for defense
+            ai_executing = True
+            ai_decision_timer = 0
+            ai_make_defense_decision()
 
 def idle():
     """Update game state"""
     global defend_timer, attack_timer, last_time, popup_timer, popup_message
     global camera_animating, camera_anim_progress
+    global ai_decision_timer, ai_executing
     
     import time
     current_time = time.time()
@@ -1349,6 +1557,11 @@ def idle():
     # Cap delta time to prevent huge jumps
     if dt > 0.1:
         dt = 0.1
+    
+    # AI update
+    if game_state == "playing" and not pause and game_mode == "pvai":
+        update_ai(dt)
+    
     # Gravity logic
     if game_state == "playing" and not pause:
         gravity = 1500
@@ -1362,6 +1575,8 @@ def idle():
                 if p["jump_height"] <= 0:
                     p["jump_height"] = 0
                     p["vel"] = 0
+        
+        
     # Update camera animation
     if camera_animating:
         camera_anim_progress += dt / camera_anim_duration
@@ -1395,10 +1610,8 @@ def idle():
             update_attack(dt)
         defend_timer += dt
         
-        # Update jump animation and danger zone effects
+        # Get defender reference for mechanics below
         defender = player2 if current_turn == 1 else player1
-        if defender["jump_height"] > 0:
-            defender["jump_height"] = max(0, defender["jump_height"] - 300 * dt)
         
         # Watchtower mechanics (hard difficulty)
         if level == "hard":
@@ -1511,6 +1724,18 @@ def showScreen():
         draw_text(320, 320, "Press ENTER to Start", GLUT_BITMAP_HELVETICA_18)
         draw_text(200, 200, "Controls: A/D-Move  1/2/3-Attack  SPACE-Fire  Q-Parry  E-Jump", GLUT_BITMAP_HELVETICA_12)
     
+    elif game_state == "mode_select":
+        glClearColor(0.0, 0.0, 0.0, 1)  # Black background
+        draw_text(360, 700, "SELECT GAME MODE", GLUT_BITMAP_TIMES_ROMAN_24)
+        
+        glColor3f(0.5, 0.8, 1.0)  # Light blue
+        draw_text(300, 550, "1 - PLAYER VS PLAYER", GLUT_BITMAP_HELVETICA_18)
+        draw_text(250, 510, "Two players battle against each other", GLUT_BITMAP_HELVETICA_12)
+        
+        glColor3f(1.0, 0.7, 0.3)  # Orange
+        draw_text(300, 430, "2 - PLAYER VS AI", GLUT_BITMAP_HELVETICA_18)
+        draw_text(250, 390, "Battle against computer-controlled opponent", GLUT_BITMAP_HELVETICA_12)
+    
     elif game_state == "element_select":
         glClearColor(0.0, 0.0, 0.0, 1)  # Black background
         draw_text(320, 700, "SELECT YOUR ELEMENT", GLUT_BITMAP_TIMES_ROMAN_24)
@@ -1525,7 +1750,10 @@ def showScreen():
         
         if player2["element"]:
             glColor3f(player2["color"][0], player2["color"][1], player2["color"][2])
-            draw_text(300, y_pos, f"Player 2: {element_names[player2['element']]}", GLUT_BITMAP_HELVETICA_18)
+            if game_mode == "pvai":
+                draw_text(300, y_pos, f"AI: {element_names[player2['element']]}", GLUT_BITMAP_HELVETICA_18)
+            else:
+                draw_text(300, y_pos, f"Player 2: {element_names[player2['element']]}", GLUT_BITMAP_HELVETICA_18)
     
     elif game_state == "level_select":
         glClearColor(0.0, 0.0, 0.0, 1)  # Black background
@@ -1587,7 +1815,10 @@ def showScreen():
         draw_text(990, 785, "|", GLUT_BITMAP_TIMES_ROMAN_24)
         
         glColor3f(1, 1, 1)
-        draw_text(685, 785, "PLAYER BLUE", GLUT_BITMAP_HELVETICA_12)
+        if game_mode == "pvai":
+            draw_text(685, 785, "AI BLUE", GLUT_BITMAP_HELVETICA_12)
+        else:
+            draw_text(685, 785, "PLAYER BLUE", GLUT_BITMAP_HELVETICA_12)
         draw_text(685, 765, f"TYPE: {element_names.get(player2['element'], 'NONE').upper()}", GLUT_BITMAP_HELVETICA_12)
         draw_text(685, 735, f"HP: {player2['hp']}/100", GLUT_BITMAP_HELVETICA_12)
         draw_text(685, 715, f"ST: {player2['st']}/100", GLUT_BITMAP_HELVETICA_12)
@@ -1602,13 +1833,21 @@ def showScreen():
         draw_text(320, 50, f"ROUND {round_number}:", GLUT_BITMAP_HELVETICA_18)
         
         if phase == "attack":
-            color_name = "RED" if current_turn == 1 else "BLUE"
-            glColor3f(1, 0, 0) if current_turn == 1 else glColor3f(0, 0.5, 1)
-            draw_text(460, 50, f"{color_name} IS ATTACKING", GLUT_BITMAP_HELVETICA_18)
+            if game_mode == "pvai" and current_turn == 2:
+                glColor3f(1.0, 0.7, 0.3)  # Orange for AI
+                draw_text(460, 50, "AI IS ATTACKING", GLUT_BITMAP_HELVETICA_18)
+            else:
+                color_name = "RED" if current_turn == 1 else "BLUE"
+                glColor3f(1, 0, 0) if current_turn == 1 else glColor3f(0, 0.5, 1)
+                draw_text(460, 50, f"{color_name} IS ATTACKING", GLUT_BITMAP_HELVETICA_18)
         else:
-            color_name = "BLUE" if current_turn == 1 else "RED"
-            glColor3f(0, 0.5, 1) if current_turn == 1 else glColor3f(1, 0, 0)
-            draw_text(460, 50, f"{color_name} IS DEFENDING", GLUT_BITMAP_HELVETICA_18)
+            if game_mode == "pvai" and current_turn == 1:
+                glColor3f(1.0, 0.7, 0.3)  # Orange for AI
+                draw_text(460, 50, "AI IS DEFENDING", GLUT_BITMAP_HELVETICA_18)
+            else:
+                color_name = "BLUE" if current_turn == 1 else "RED"
+                glColor3f(0, 0.5, 1) if current_turn == 1 else glColor3f(1, 0, 0)
+                draw_text(460, 50, f"{color_name} IS DEFENDING", GLUT_BITMAP_HELVETICA_18)
         
         if cheat_mode:
             glColor3f(1, 0, 0)
@@ -1622,7 +1861,15 @@ def showScreen():
         winner_player = player1 if winner == 1 else player2
         glColor3f(winner_player["color"][0], winner_player["color"][1], winner_player["color"][2])
         draw_text(350, 450, "GAME OVER", GLUT_BITMAP_TIMES_ROMAN_24)
-        draw_text(250, 380, f"Player {winner} ({element_names[winner_player['element']]}) Wins!", GLUT_BITMAP_HELVETICA_18)
+        
+        if game_mode == "pvai":
+            if winner == 1:
+                draw_text(280, 380, f"You Win! ({element_names[winner_player['element']]})", GLUT_BITMAP_HELVETICA_18)
+            else:
+                draw_text(280, 380, f"AI Wins! ({element_names[winner_player['element']]})", GLUT_BITMAP_HELVETICA_18)
+        else:
+            draw_text(250, 380, f"Player {winner} ({element_names[winner_player['element']]}) Wins!", GLUT_BITMAP_HELVETICA_18)
+        
         glColor3f(1, 1, 1)
         draw_text(320, 320, "Press L to Restart", GLUT_BITMAP_HELVETICA_18)
     
