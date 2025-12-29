@@ -124,6 +124,9 @@ ARENA_LENGTH = 450
 danger_zone_x = 0  # Center X position of danger zone
 danger_zone_width = 120  # Width of danger zone
 danger_zone_timer = 0  # Time spent in danger zone
+danger_zone_direction = 1  # Direction of movement: 1 for right, -1 for left
+danger_zone_speed = 100  # Movement speed in units per second
+danger_zone_element = "WTR"  # Danger zone represents Water element
 
 # Watchtower (hard difficulty)
 active_watchtower = None  # "left" or "right"
@@ -136,7 +139,7 @@ watchtower_cooldown = 0  # Cooldown between shots
 def initialize_game():
     """Reset game to initial state"""
     global player1, player2, game_state, current_turn, active_attack, winner
-    global round_number, phase, danger_zone_timer
+    global round_number, phase, danger_zone_timer, danger_zone_direction
     global active_watchtower, watchtower_bullet, watchtower_bullet2, watchtower_cooldown
     global ai_decision_timer, ai_executing
     global game_over_animation, game_over_timer, loser_rotation
@@ -175,6 +178,7 @@ def initialize_game():
     phase = "attack"
     game_state = "playing"
     danger_zone_timer = 0
+    danger_zone_direction = 1  # Reset direction
     active_watchtower = None
     watchtower_bullet = None
     watchtower_bullet2 = None
@@ -1725,27 +1729,65 @@ def idle():
         
         # Check danger zone (medium difficulty)
         if level == "medium" and game_state == "playing":
+            # Update danger zone position (move back and forth)
+            global danger_zone_x, danger_zone_direction
+            danger_zone_x += danger_zone_direction * danger_zone_speed * dt
+            
+            # Bounce at arena boundaries
             half_width = danger_zone_width / 2
+            max_x = ARENA_WIDTH - half_width - 30
+            min_x = -ARENA_WIDTH + half_width + 30
+            
+            if danger_zone_x >= max_x:
+                danger_zone_x = max_x
+                danger_zone_direction = -1
+            elif danger_zone_x <= min_x:
+                danger_zone_x = min_x
+                danger_zone_direction = 1
+            
+            # Check if defender is in danger zone
             in_danger_zone = (danger_zone_x - half_width <= defender["pos"][0] <= danger_zone_x + half_width)
             
             if in_danger_zone:
-                # Apply speed reduction (70% slower)
-                base_speed = 40
-                if defender["status"] == "FRIZ":
-                    defender["move_speed"] = int(base_speed * 0.4 * 0.1)  # Combine with freeze
-                elif defender["status"] == "STUN":
-                    defender["move_speed"] = int(base_speed * 0.7 * 0.1)  # Combine with stun
+                # Element-reactive zone effects
+                defender_element = defender["element"]
+                damage_multiplier = 1.0
+                
+                # Fire player in Water zone: double damage
+                if defender_element == "FIR" and danger_zone_element == "WTR":
+                    damage_multiplier = 2.0
+                    print("Fire player in Water zone - double damage!")
+                
+                # Air/Wind player: push instead of slow
+                if defender_element == "WND":
+                    # Push player away from center of danger zone
+                    push_force = 150 * dt  # Push speed
+                    if defender["pos"][0] < danger_zone_x:
+                        # Push left
+                        defender["pos"][0] = max(-ARENA_WIDTH + 50, defender["pos"][0] - push_force)
+                    else:
+                        # Push right
+                        defender["pos"][0] = min(ARENA_WIDTH - 50, defender["pos"][0] + push_force)
+                    print("Wind player pushed by danger zone!")
                 else:
-                    defender["move_speed"] = int(base_speed * 0.1)  # 70% reduction
+                    # Apply speed reduction (70% slower) for non-Wind players
+                    base_speed = 40
+                    if defender["status"] == "FRIZ":
+                        defender["move_speed"] = int(base_speed * 0.4 * 0.1)  # Combine with freeze
+                    elif defender["status"] == "STUN":
+                        defender["move_speed"] = int(base_speed * 0.7 * 0.1)  # Combine with stun
+                    else:
+                        defender["move_speed"] = int(base_speed * 0.1)  # 70% reduction
                 
                 # Track time in danger zone and drain HP
                 global danger_zone_timer
                 danger_zone_timer += dt
                 
                 if danger_zone_timer >= 1.0:
-                    defender["hp"] = max(0, defender["hp"] - 1)
+                    damage = int(1 * damage_multiplier)
+                    defender["hp"] = max(0, defender["hp"] - damage)
                     danger_zone_timer -= 1.0  # Subtract 1 second instead of reset to accumulate remainder
-                    print(f"Danger zone damage! HP: {defender['hp']}")
+                    print(f"Danger zone damage! Damage: {damage}, HP: {defender['hp']}")
             else:
                 # Reset timer and speed when outside danger zone
                 danger_zone_timer = 0
