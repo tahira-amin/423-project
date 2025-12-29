@@ -3,12 +3,13 @@ from OpenGL.GLUT import *
 from OpenGL.GLU import *
 import random
 import math
-import ctypes
 
-# Define GLUT fonts using ctypes pointers
-GLUT_BITMAP_HELVETICA_18 = ctypes.c_void_p(7)
-GLUT_BITMAP_TIMES_ROMAN_24 = ctypes.c_void_p(6)
-GLUT_BITMAP_HELVETICA_12 = ctypes.c_void_p(8)
+
+from OpenGL.GLUT import GLUT_BITMAP_HELVETICA_18
+from OpenGL.GLUT import GLUT_BITMAP_TIMES_ROMAN_24
+from OpenGL.GLUT import GLUT_BITMAP_HELVETICA_12
+from OpenGL.GLUT import GLUT_BITMAP_9_BY_15
+
 
 # Camera variables
 camera_pos = [0, -800, 400]
@@ -1323,7 +1324,7 @@ def keyboardListener(key, x, y):
         pause = not pause
         return
     
-    if key == b'l':
+    if key == b'r':
         if game_state == "game_over":
             game_state = "mode_select"
             player1["element"] = None
@@ -1786,28 +1787,28 @@ def showScreen():
     
     if game_state == "menu":
         glClearColor(0.0, 0.0, 0.0, 1)  # Black background
-        draw_text(380, 450, "POSITRON", GLUT_BITMAP_TIMES_ROMAN_24)
-        draw_text(300, 380, "3D Turn-Based Battle", GLUT_BITMAP_HELVETICA_18)
-        draw_text(320, 320, "Press ENTER to Start", GLUT_BITMAP_HELVETICA_18)
-        draw_text(200, 200, "Controls: A/D-Move  1/2/3-Attack  SPACE-Fire  Q-Parry  E-Jump", GLUT_BITMAP_HELVETICA_12)
+        draw_text(450, 450, "POSITRON", GLUT_BITMAP_TIMES_ROMAN_24)
+        draw_text(420, 360, "3D Turn-Based Battle", GLUT_BITMAP_HELVETICA_18)
+        draw_text(420, 320, "Press ENTER to Start", GLUT_BITMAP_HELVETICA_18)
+        draw_text(300, 200, "Controls: A/D-Move  1/2/3-Attack  SPACE-Fire  Q-Parry  E-Jump", GLUT_BITMAP_HELVETICA_12)
     
     elif game_state == "mode_select":
         glClearColor(0.0, 0.0, 0.0, 1)  # Black background
         draw_text(360, 700, "SELECT GAME MODE", GLUT_BITMAP_TIMES_ROMAN_24)
         
         glColor3f(0.5, 0.8, 1.0)  # Light blue
-        draw_text(300, 550, "1 - PLAYER VS PLAYER", GLUT_BITMAP_HELVETICA_18)
-        draw_text(250, 510, "Two players battle against each other", GLUT_BITMAP_HELVETICA_12)
+        draw_text(360, 550, "1 - PLAYER VS PLAYER", GLUT_BITMAP_HELVETICA_18)
+        draw_text(350, 510, "Two players battle against each other", GLUT_BITMAP_HELVETICA_12)
         
         glColor3f(1.0, 0.7, 0.3)  # Orange
-        draw_text(300, 430, "2 - PLAYER VS AI", GLUT_BITMAP_HELVETICA_18)
-        draw_text(250, 390, "Battle against computer-controlled opponent", GLUT_BITMAP_HELVETICA_12)
+        draw_text(360, 430, "2 - PLAYER VS AI", GLUT_BITMAP_HELVETICA_18)
+        draw_text(350, 390, "Battle against computer-controlled opponent", GLUT_BITMAP_HELVETICA_12)
     
     elif game_state == "element_select":
         glClearColor(0.0, 0.0, 0.0, 1)  # Black background
-        draw_text(320, 700, "SELECT YOUR ELEMENT", GLUT_BITMAP_TIMES_ROMAN_24)
-        draw_text(150, 600, "1 - Fire (Red)     2 - Water (Blue)     3 - Electric (Yellow)", GLUT_BITMAP_HELVETICA_18)
-        draw_text(150, 550, "4 - Earth (Green)  5 - Wind (Grey)      6 - Ice (Cyan)", GLUT_BITMAP_HELVETICA_18)
+        draw_text(380, 700, "SELECT YOUR ELEMENT", GLUT_BITMAP_TIMES_ROMAN_24)
+        draw_text(290, 600, "1 - Fire (Red)     2 - Water (Blue)     3 - Electric (Yellow)", GLUT_BITMAP_HELVETICA_18)
+        draw_text(300, 550, "4 - Earth (Green)  5 - Wind (Grey)      6 - Ice (Cyan)", GLUT_BITMAP_HELVETICA_18)
         
         y_pos = 400
         if player1["element"]:
@@ -1824,7 +1825,7 @@ def showScreen():
     
     elif game_state == "level_select":
         glClearColor(0.0, 0.0, 0.0, 1)  # Black background
-        draw_text(340, 700, "SELECT DIFFICULTY", GLUT_BITMAP_TIMES_ROMAN_24)
+        draw_text(380, 700, "SELECT DIFFICULTY", GLUT_BITMAP_TIMES_ROMAN_24)
         
         if game_mode == "pvai":
             # AI mode: Easy and Hard only
@@ -1835,8 +1836,8 @@ def showScreen():
             draw_text(300, 500, "3 - HARD ", GLUT_BITMAP_HELVETICA_18)
             
             glColor3f(1, 1, 1)
-            draw_text(200, 350, "Easy: AI has low accuracy and slow reactions.", GLUT_BITMAP_HELVETICA_12)
-            draw_text(200, 325, "Hard: AI has improved accuracy and faster reactions.", GLUT_BITMAP_HELVETICA_12)
+            draw_text(300, 350, "Easy: AI has low accuracy and slow reactions.", GLUT_BITMAP_HELVETICA_12)
+            draw_text(300, 325, "Hard: AI has improved accuracy and faster reactions.", GLUT_BITMAP_HELVETICA_12)
         else:
             # PvP mode: Easy, Medium, Hard
             glColor3f(0.5, 1.0, 0.5)  # Light green
@@ -1849,9 +1850,9 @@ def showScreen():
             draw_text(300, 450, "3 - HARD (Watchtower snipers)", GLUT_BITMAP_HELVETICA_18)
             
             glColor3f(1, 1, 1)
-            draw_text(200, 350, "Medium: White danger zones appear during defense.", GLUT_BITMAP_HELVETICA_12)
-            draw_text(200, 325, "         Standing inside reduces speed by 70% and drains 1 HP/sec.", GLUT_BITMAP_HELVETICA_12)
-            draw_text(200, 300, "Hard:   Watchtowers shoot at defender. Each hit deals 10 damage.", GLUT_BITMAP_HELVETICA_12)
+            draw_text(280, 350, "Medium: White danger zones appear during defense.", GLUT_BITMAP_HELVETICA_12)
+            draw_text(290, 325, "           Standing inside reduces speed by 70% and drains 1 HP/sec.", GLUT_BITMAP_HELVETICA_12)
+            draw_text(280, 300, "Hard: Watchtowers shoot at defender. Each hit deals 10 damage.", GLUT_BITMAP_HELVETICA_12)
     
     elif game_state == "playing":
         glClearColor(0.0, 0.0, 0.0, 1)  # Black background
@@ -1896,17 +1897,17 @@ def showScreen():
         
         glColor3f(1, 1, 1)
         if game_mode == "pvai":
-            draw_text(685, 785, "AI BLUE", GLUT_BITMAP_HELVETICA_12)
+            draw_text(900, 785, "AI BLUE", GLUT_BITMAP_HELVETICA_12)
         else:
-            draw_text(685, 785, "PLAYER BLUE", GLUT_BITMAP_HELVETICA_12)
-        draw_text(685, 765, f"TYPE: {element_names.get(player2['element'], 'NONE').upper()}", GLUT_BITMAP_HELVETICA_12)
-        draw_text(685, 735, f"HP: {player2['hp']}/100", GLUT_BITMAP_HELVETICA_12)
-        draw_text(685, 715, f"ST: {player2['st']}/100", GLUT_BITMAP_HELVETICA_12)
+            draw_text(900, 785, "PLAYER BLUE", GLUT_BITMAP_HELVETICA_12)
+        draw_text(900, 765, f"TYPE: {element_names.get(player2['element'], 'NONE').upper()}", GLUT_BITMAP_HELVETICA_12)
+        draw_text(900, 735, f"HP: {player2['hp']}/100", GLUT_BITMAP_HELVETICA_12)
+        draw_text(900, 715, f"ST: {player2['st']}/100", GLUT_BITMAP_HELVETICA_12)
         
         if player2["status"]:
-            draw_text(685, 695, f"SP: {player2['status']}", GLUT_BITMAP_HELVETICA_12)
+            draw_text(900, 695, f"SP: {player2['status']}", GLUT_BITMAP_HELVETICA_12)
         else:
-            draw_text(685, 695, "SP: NONE", GLUT_BITMAP_HELVETICA_12)
+            draw_text(900, 695, "SP: NONE", GLUT_BITMAP_HELVETICA_12)
         
         # Bottom center - Round and phase info
         glColor3f(1, 1, 1)
@@ -1955,18 +1956,18 @@ def showScreen():
             glClearColor(0.0, 0.0, 0.0, 1)  # Black background
             winner_player = player1 if winner == 1 else player2
             glColor3f(winner_player["color"][0], winner_player["color"][1], winner_player["color"][2])
-            draw_text(350, 450, "GAME OVER", GLUT_BITMAP_TIMES_ROMAN_24)
+            draw_text(400, 450, "GAME OVER", GLUT_BITMAP_TIMES_ROMAN_24)
             
             if game_mode == "pvai":
                 if winner == 1:
-                    draw_text(280, 380, f"You Win! ({element_names[winner_player['element']]})", GLUT_BITMAP_HELVETICA_18)
+                    draw_text(400, 380, f"You Win! ({element_names[winner_player['element']]})", GLUT_BITMAP_HELVETICA_18)
                 else:
-                    draw_text(280, 380, f"AI Wins! ({element_names[winner_player['element']]})", GLUT_BITMAP_HELVETICA_18)
+                    draw_text(400, 380, f"AI Wins! ({element_names[winner_player['element']]})", GLUT_BITMAP_HELVETICA_18)
             else:
-                draw_text(250, 380, f"Player {winner} ({element_names[winner_player['element']]}) Wins!", GLUT_BITMAP_HELVETICA_18)
+                draw_text(400, 380, f"Player {winner} ({element_names[winner_player['element']]}) Wins!", GLUT_BITMAP_HELVETICA_18)
             
             glColor3f(1, 1, 1)
-            draw_text(320, 320, "Press L to Restart", GLUT_BITMAP_HELVETICA_18)
+            draw_text(400, 320, "Press R to Restart", GLUT_BITMAP_HELVETICA_18)
     
     glutSwapBuffers()
 
