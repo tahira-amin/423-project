@@ -260,8 +260,8 @@ def draw_popup():
         draw_text(340, 720, popup_message, GLUT_BITMAP_TIMES_ROMAN_24)
 
 def draw_watchtowers():
-    """Draw watchtowers for hard difficulty"""
-    if level != "hard":
+    """Draw watchtowers for hard difficulty (only in PvP mode)"""
+    if level != "hard" or game_mode == "pvai":
         return
     
     tower_radius = 15
@@ -447,7 +447,7 @@ def draw_player(player):
     if game_state == "game_over" and game_over_animation:
         loser = player2 if winner == 1 else player1
         if player == loser:
-            glRotatef(loser_rotation, 1, 0, 0)  # Rotate around X-axis to fall forward
+            glRotatef(loser_rotation, 0, 1, 0)  # Rotate around Y-axis to fall sideways
     
     # Main body sphere
     glColor3f(player["color"][0], player["color"][1], player["color"][2])
@@ -838,23 +838,28 @@ def fire_attack():
         # Set random AI reaction time if player 1 is attacking
         if current_turn == 1:
             global ai_reaction_delay
-            # Random reaction time: 0.2s (fast) to 1.5s (slow/too late)
-            # Distribution: 40% fast (0.2-0.6s), 40% medium (0.6-1.0s), 20% slow (1.0-1.5s)
-            rand = random.random()
-            if rand < 0.4:
-                ai_reaction_delay = random.uniform(0.2, 0.6)  # Fast reaction
-            elif rand < 0.8:
-                ai_reaction_delay = random.uniform(0.6, 1.0)  # Medium reaction
+            if level == "hard":
+                # Hard difficulty: Faster, more consistent reactions (0.3-0.5s)
+                ai_reaction_delay = random.uniform(0.3, 0.7)
             else:
-                ai_reaction_delay = random.uniform(1.0, 1.5)  # Slow reaction (might get hit)
+                # Easy difficulty: Variable reaction time (0.3-1.5s)
+                rand = random.random()
+                if rand < 0.4:
+                   ai_reaction_delay = random.uniform(0.3, 0.6) # Fast reaction
+                elif rand < 0.8:
+                   ai_reaction_delay = random.uniform(0.6, 1.0) # Medium reaction
+                else:
+                   ai_reaction_delay = random.uniform(1.0, 1.5) # Slow reaction (might get hit)
+
+
             print(f"AI reaction time set to: {ai_reaction_delay:.2f}s")
     
     # Switch to defend phase (but don't move attack yet - wait for animation)
     phase = "defend"
     defend_timer = 0
     
-    # Activate watchtower for hard difficulty
-    if level == "hard":
+    # Activate watchtower for hard difficulty (only in PvP mode)
+    if level == "hard" and game_mode == "pvp":
         global active_watchtower, watchtower_cooldown
         active_watchtower = random.choice(["left", "right"])
         watchtower_cooldown = 1.5  # 1.5 second delay before first shot
@@ -946,9 +951,14 @@ def ai_make_attack_decision():
     
     reset_crosshair()
     
-    # Calculate target with inaccuracy
-    # Easy difficulty: ±30 to ±80 pixel random offset
-    inaccuracy_x = random.uniform(-80, 80)
+    # Calculate target with inaccuracy based on difficulty
+    if level == "hard":
+        # Hard difficulty: ±20 to ±40 pixel random offset (improved accuracy)
+        inaccuracy_x = random.uniform(-40, 40)
+    else:
+        # Easy difficulty: ±30 to ±80 pixel random offset
+        inaccuracy_x = random.uniform(-80, 80)
+    
     target_x = target_player["pos"][0] + inaccuracy_x
     
     # Clamp to crosshair range
@@ -1171,7 +1181,13 @@ def resolve_attack():
         game_over_animation = True
         game_over_timer = 0
         loser_rotation = 0
-        popup_message = "YOU WIN!"
+        if game_mode == "pvai":
+            if winner == 1:
+                popup_message = "You Win!"
+            else:
+                popup_message = "AI Wins!"
+        else:
+            popup_message = f"Player {winner} Wins!"
         popup_timer = 0
         print(f"Player {winner} wins!")
         return
@@ -1355,8 +1371,10 @@ def keyboardListener(key, x, y):
             level = "easy"
             initialize_game()
         elif key == b'2':
-            level = "medium"
-            initialize_game()
+            # Only allow medium difficulty in PvP mode
+            if game_mode == "pvp":
+                level = "medium"
+                initialize_game()
         elif key == b'3':
             level = "hard"
             initialize_game()
@@ -1573,6 +1591,7 @@ def idle():
     global defend_timer, attack_timer, last_time, popup_timer, popup_message
     global camera_animating, camera_anim_progress
     global ai_decision_timer, ai_executing
+    global game_over_timer, loser_rotation, game_over_animation
     
     import time
     current_time = time.time()
@@ -1624,7 +1643,6 @@ def idle():
     
     # Game over animation
     if game_state == "game_over" and game_over_animation:
-        global game_over_timer, loser_rotation
         game_over_timer += dt
         
         # Animate loser falling (rotate from 0 to 90 degrees over 1.5 seconds)
@@ -1662,8 +1680,8 @@ def idle():
         # Get defender reference for mechanics below
         defender = player2 if current_turn == 1 else player1
         
-        # Watchtower mechanics (hard difficulty)
-        if level == "hard" and game_state == "playing":
+        # Watchtower mechanics (hard difficulty, PvP only)
+        if level == "hard" and game_state == "playing" and game_mode == "pvp":
             global watchtower_cooldown, watchtower_bullet, watchtower_bullet_progress, watchtower_bullet2, watchtower_bullet2_progress
             
             # Cooldown before shooting
@@ -1808,19 +1826,32 @@ def showScreen():
         glClearColor(0.0, 0.0, 0.0, 1)  # Black background
         draw_text(340, 700, "SELECT DIFFICULTY", GLUT_BITMAP_TIMES_ROMAN_24)
         
-        glColor3f(0.5, 1.0, 0.5)  # Light green
-        draw_text(300, 550, "1 - EASY (Normal mode)", GLUT_BITMAP_HELVETICA_18)
-        
-        glColor3f(1.0, 1.0, 0.5)  # Yellow
-        draw_text(300, 500, "2 - MEDIUM (Danger zones)", GLUT_BITMAP_HELVETICA_18)
-        
-        glColor3f(1.0, 0.3, 0.3)  # Red
-        draw_text(300, 450, "3 - HARD (Watchtower snipers)", GLUT_BITMAP_HELVETICA_18)
-        
-        glColor3f(1, 1, 1)
-        draw_text(200, 350, "Medium: White danger zones appear during defense.", GLUT_BITMAP_HELVETICA_12)
-        draw_text(200, 325, "         Standing inside reduces speed by 70% and drains 1 HP/sec.", GLUT_BITMAP_HELVETICA_12)
-        draw_text(200, 300, "Hard:   Watchtowers shoot at defender. Each hit deals 10 damage.", GLUT_BITMAP_HELVETICA_12)
+        if game_mode == "pvai":
+            # AI mode: Easy and Hard only
+            glColor3f(0.5, 1.0, 0.5)  # Light green
+            draw_text(300, 550, "1 - EASY ", GLUT_BITMAP_HELVETICA_18)
+            
+            glColor3f(1.0, 0.3, 0.3)  # Red
+            draw_text(300, 500, "3 - HARD ", GLUT_BITMAP_HELVETICA_18)
+            
+            glColor3f(1, 1, 1)
+            draw_text(200, 350, "Easy: AI has low accuracy and slow reactions.", GLUT_BITMAP_HELVETICA_12)
+            draw_text(200, 325, "Hard: AI has improved accuracy and faster reactions.", GLUT_BITMAP_HELVETICA_12)
+        else:
+            # PvP mode: Easy, Medium, Hard
+            glColor3f(0.5, 1.0, 0.5)  # Light green
+            draw_text(300, 550, "1 - EASY (Normal mode)", GLUT_BITMAP_HELVETICA_18)
+            
+            glColor3f(1.0, 1.0, 0.5)  # Yellow
+            draw_text(300, 500, "2 - MEDIUM (Danger zones)", GLUT_BITMAP_HELVETICA_18)
+            
+            glColor3f(1.0, 0.3, 0.3)  # Red
+            draw_text(300, 450, "3 - HARD (Watchtower snipers)", GLUT_BITMAP_HELVETICA_18)
+            
+            glColor3f(1, 1, 1)
+            draw_text(200, 350, "Medium: White danger zones appear during defense.", GLUT_BITMAP_HELVETICA_12)
+            draw_text(200, 325, "         Standing inside reduces speed by 70% and drains 1 HP/sec.", GLUT_BITMAP_HELVETICA_12)
+            draw_text(200, 300, "Hard:   Watchtowers shoot at defender. Each hit deals 10 damage.", GLUT_BITMAP_HELVETICA_12)
     
     elif game_state == "playing":
         glClearColor(0.0, 0.0, 0.0, 1)  # Black background
