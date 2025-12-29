@@ -101,6 +101,12 @@ popup_message = ""
 popup_timer = 0
 popup_duration = 2.0  # Display for 2 seconds
 
+# Game over animation variables
+game_over_animation = False
+game_over_timer = 0
+game_over_duration = 3.0  # 3 seconds of animation before showing final screen
+loser_rotation = 0  # Rotation angle for falling animation
+
 # Camera animation variables
 camera_animating = False
 camera_anim_progress = 0
@@ -133,6 +139,7 @@ def initialize_game():
     global round_number, phase, danger_zone_timer
     global active_watchtower, watchtower_bullet, watchtower_bullet2, watchtower_cooldown
     global ai_decision_timer, ai_executing
+    global game_over_animation, game_over_timer, loser_rotation
     
     player1["hp"] = 100
     player1["st"] = 0
@@ -174,6 +181,9 @@ def initialize_game():
     watchtower_cooldown = 0
     ai_decision_timer = 0
     ai_executing = False
+    game_over_animation = False
+    game_over_timer = 0
+    loser_rotation = 0
     reset_crosshair()
     
     # Initialize danger zone for medium difficulty
@@ -432,6 +442,12 @@ def draw_player(player):
     """Draw a player as a large sphere"""
     glPushMatrix()
     glTranslatef(player["pos"][0], player["pos"][1], player["pos"][2] + player["jump_height"])
+    
+    # Apply rotation if this is the loser during game over animation
+    if game_state == "game_over" and game_over_animation:
+        loser = player2 if winner == 1 else player1
+        if player == loser:
+            glRotatef(loser_rotation, 1, 0, 0)  # Rotate around X-axis to fall forward
     
     # Main body sphere
     glColor3f(player["color"][0], player["color"][1], player["color"][2])
@@ -841,14 +857,14 @@ def fire_attack():
     if level == "hard":
         global active_watchtower, watchtower_cooldown
         active_watchtower = random.choice(["left", "right"])
-        watchtower_cooldown = 2.0  # 2 second delay before first shot
+        watchtower_cooldown = 1.5  # 1.5 second delay before first shot
         print(f"Watchtower activated: {active_watchtower}")
 
 def fire_watchtower_bullet():
     """Fire bullet from active watchtower at defender and non-active at random position"""
     global watchtower_bullet, watchtower_bullet_progress, watchtower_bullet2, watchtower_bullet2_progress
     
-    if level != "hard" or phase != "defend" or active_watchtower is None:
+    if level != "hard" or active_watchtower is None:
         return
     
     defender = player2 if current_turn == 1 else player1
@@ -1072,7 +1088,7 @@ def update_attack(dt):
 
 def resolve_attack():
     """Calculate damage and effects when attack lands"""
-    global active_attack, phase, current_turn, game_state, winner
+    global active_attack, phase, current_turn, game_state, winner,popup_message, popup_timer
     
     attacker = player1 if current_turn == 1 else player2
     defender = player2 if current_turn == 1 else player1
@@ -1143,15 +1159,20 @@ def resolve_attack():
         defender["st"] = min(100, defender["st"] + 10)
         print(f"MISS! Defender dodged.")
         # Show dodge popup
-        global popup_message, popup_timer
         popup_message = "DODGED!"
         popup_timer = 0
     
     # Check win condition first
     if defender["hp"] <= 0:
+        global game_over_animation, game_over_timer, loser_rotation
         game_state = "game_over"
         winner = current_turn
         active_attack = None
+        game_over_animation = True
+        game_over_timer = 0
+        loser_rotation = 0
+        popup_message = "YOU WIN!"
+        popup_timer = 0
         print(f"Player {winner} wins!")
         return
     
@@ -1453,7 +1474,17 @@ def setupCamera():
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
     
-    if camera_mode == "static":
+    # Game over: camera behind winner
+    if game_state == "game_over" and game_over_animation:
+        if winner == 1:
+            gluLookAt(0, -700, 250,
+                      0, 200, 60,
+                      0, 0, 1)
+        else:
+            gluLookAt(0, 700, 250,
+                      0, -200, 60,
+                      0, 0, 1)
+    elif camera_mode == "static":
         # In AI mode, always stay behind player 1
         if game_mode == "pvai":
             gluLookAt(0, -700, 250,
@@ -1591,6 +1622,24 @@ def idle():
             popup_message = ""
             popup_timer = 0
     
+    # Game over animation
+    if game_state == "game_over" and game_over_animation:
+        global game_over_timer, loser_rotation
+        game_over_timer += dt
+        
+        # Animate loser falling (rotate from 0 to 90 degrees over 1.5 seconds)
+        if game_over_timer < 1.5:
+            loser_rotation = min(90, (game_over_timer / 1.5) * 90)
+        else:
+            loser_rotation = 90
+        
+        # End animation after duration
+        if game_over_timer >= game_over_duration:
+            game_over_animation = False
+        
+        glutPostRedisplay()
+        return
+    
     if pause or game_state != "playing":
         glutPostRedisplay()
         return
@@ -1614,7 +1663,7 @@ def idle():
         defender = player2 if current_turn == 1 else player1
         
         # Watchtower mechanics (hard difficulty)
-        if level == "hard":
+        if level == "hard" and game_state == "playing":
             global watchtower_cooldown, watchtower_bullet, watchtower_bullet_progress, watchtower_bullet2, watchtower_bullet2_progress
             
             # Cooldown before shooting
@@ -1647,7 +1696,7 @@ def idle():
                         print(f"Active watchtower missed! Distance: {hit_distance:.1f}")
                     
                     watchtower_bullet = None
-                    watchtower_cooldown = 3.0  # 3 second cooldown before next shot
+                    watchtower_cooldown = 1.5  # 1.5 second cooldown before next shot
             
             # Update bullet 2 movement (non-active tower - random direction)
             if watchtower_bullet2 is not None:
@@ -1675,7 +1724,7 @@ def idle():
                     watchtower_bullet2 = None
         
         # Check danger zone (medium difficulty)
-        if level == "medium":
+        if level == "medium" and game_state == "playing":
             half_width = danger_zone_width / 2
             in_danger_zone = (danger_zone_x - half_width <= defender["pos"][0] <= danger_zone_x + half_width)
             
@@ -1857,21 +1906,36 @@ def showScreen():
         draw_popup()
     
     elif game_state == "game_over":
-        glClearColor(0.0, 0.0, 0.0, 1)  # Black background
-        winner_player = player1 if winner == 1 else player2
-        glColor3f(winner_player["color"][0], winner_player["color"][1], winner_player["color"][2])
-        draw_text(350, 450, "GAME OVER", GLUT_BITMAP_TIMES_ROMAN_24)
-        
-        if game_mode == "pvai":
-            if winner == 1:
-                draw_text(280, 380, f"You Win! ({element_names[winner_player['element']]})", GLUT_BITMAP_HELVETICA_18)
-            else:
-                draw_text(280, 380, f"AI Wins! ({element_names[winner_player['element']]})", GLUT_BITMAP_HELVETICA_18)
+        # During animation, show 3D scene with camera behind winner
+        if game_over_animation:
+            glClearColor(0.0, 0.0, 0.0, 1)  # Black background
+            setupCamera()
+            
+            draw_arena()
+            draw_danger_zone()
+            draw_watchtowers()
+            draw_player(player1)
+            draw_player(player2)
+            
+            # Draw YOU WIN popup
+            draw_popup()
         else:
-            draw_text(250, 380, f"Player {winner} ({element_names[winner_player['element']]}) Wins!", GLUT_BITMAP_HELVETICA_18)
-        
-        glColor3f(1, 1, 1)
-        draw_text(320, 320, "Press L to Restart", GLUT_BITMAP_HELVETICA_18)
+            # After animation, show traditional game over screen
+            glClearColor(0.0, 0.0, 0.0, 1)  # Black background
+            winner_player = player1 if winner == 1 else player2
+            glColor3f(winner_player["color"][0], winner_player["color"][1], winner_player["color"][2])
+            draw_text(350, 450, "GAME OVER", GLUT_BITMAP_TIMES_ROMAN_24)
+            
+            if game_mode == "pvai":
+                if winner == 1:
+                    draw_text(280, 380, f"You Win! ({element_names[winner_player['element']]})", GLUT_BITMAP_HELVETICA_18)
+                else:
+                    draw_text(280, 380, f"AI Wins! ({element_names[winner_player['element']]})", GLUT_BITMAP_HELVETICA_18)
+            else:
+                draw_text(250, 380, f"Player {winner} ({element_names[winner_player['element']]}) Wins!", GLUT_BITMAP_HELVETICA_18)
+            
+            glColor3f(1, 1, 1)
+            draw_text(320, 320, "Press L to Restart", GLUT_BITMAP_HELVETICA_18)
     
     glutSwapBuffers()
 
