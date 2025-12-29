@@ -17,11 +17,12 @@ camera_mode = "static"  # "static" or "free"
 camera_distance = 600
 
 # Game state
-game_state = "menu"  # "menu", "element_select", "playing", "game_over"
+game_state = "menu"  # "menu", "element_select", "level_select", "playing", "game_over"
 current_turn = 1  # 1 or 2
 phase = "attack"  # "attack", "defend", "resolution"
 winner = 0
 round_number = 1
+level = "easy"  # "easy", "medium", "hard"
 
 # Player data
 player1 = {
@@ -34,7 +35,8 @@ player1 = {
     "status_rounds": 0,
     "attack_type": "basic",
     "move_speed": 40,
-    "jump_height": 0
+    "jump_height": 0,
+    "vel": 0
 }
 
 player2 = {
@@ -47,7 +49,8 @@ player2 = {
     "status_rounds": 0,
     "attack_type": "basic",
     "move_speed": 40,
-    "jump_height": 0
+    "jump_height": 0,
+    "vel": 0
 }
 
 # Element colors and names
@@ -103,10 +106,24 @@ camera_target_look_y = 0
 ARENA_WIDTH = 350
 ARENA_LENGTH = 450
 
+# Danger zone (medium difficulty)
+danger_zone_x = 0  # Center X position of danger zone
+danger_zone_width = 120  # Width of danger zone
+danger_zone_timer = 0  # Time spent in danger zone
+
+# Watchtower (hard difficulty)
+active_watchtower = None  # "left" or "right"
+watchtower_bullet = None  # Active bullet from watchtower
+watchtower_bullet_progress = 0
+watchtower_bullet2 = None  # Second bullet from non-active watchtower
+watchtower_bullet2_progress = 0
+watchtower_cooldown = 0  # Cooldown between shots
+
 def initialize_game():
     """Reset game to initial state"""
     global player1, player2, game_state, current_turn, active_attack, winner
-    global round_number, phase
+    global round_number, phase, danger_zone_timer
+    global active_watchtower, watchtower_bullet, watchtower_bullet2, watchtower_cooldown
     
     player1["hp"] = 100
     player1["st"] = 0
@@ -116,6 +133,7 @@ def initialize_game():
     player1["attack_type"] = "basic"
     player1["move_speed"] = 40
     player1["jump_height"] = 0
+    player1["vel"] = 0
     
     player2["hp"] = 100
     player2["st"] = 0
@@ -125,6 +143,7 @@ def initialize_game():
     player2["attack_type"] = "basic"
     player2["move_speed"] = 40
     player2["jump_height"] = 0
+    player2["vel"] = 0
     
     current_turn = random.randint(1, 2)
     active_attack = None
@@ -132,7 +151,29 @@ def initialize_game():
     round_number = 1
     phase = "attack"
     game_state = "playing"
+    danger_zone_timer = 0
+    active_watchtower = None
+    watchtower_bullet = None
+    watchtower_bullet2 = None
+    watchtower_cooldown = 0
     reset_crosshair()
+    
+    # Initialize danger zone for medium difficulty
+    if level == "medium":
+        randomize_danger_zone()
+
+def randomize_danger_zone():
+    """Randomize danger zone position for medium difficulty"""
+    global danger_zone_x
+    
+    if level != "medium":
+        return
+    
+    # Random position along X axis, avoiding edges
+    max_x = ARENA_WIDTH - danger_zone_width / 2 - 30
+    min_x = -ARENA_WIDTH + danger_zone_width / 2 + 30
+    danger_zone_x = random.uniform(min_x, max_x)
+    print(f"Danger zone positioned at X={danger_zone_x:.1f}")
 
 def reset_crosshair():
     """Reset crosshair to initial state"""
@@ -189,6 +230,98 @@ def draw_popup():
         # Draw popup at top of screen
         glColor3f(1.0 * alpha, 0.8 * alpha, 0.0)  # Yellow-orange color
         draw_text(340, 720, popup_message, GLUT_BITMAP_TIMES_ROMAN_24)
+
+def draw_watchtowers():
+    """Draw watchtowers for hard difficulty"""
+    if level != "hard":
+        return
+    
+    tower_radius = 15
+    tower_height = 100
+    tower_color = [0.3, 0.3, 0.3]  # Dark grey
+    
+    # Left watchtower
+    glPushMatrix()
+    glTranslatef(-ARENA_WIDTH, 0, 0)
+    glColor3f(tower_color[0], tower_color[1], tower_color[2])
+    quadric = gluNewQuadric()
+    gluCylinder(quadric, tower_radius, tower_radius, tower_height, 20, 20)
+    # Cap on top
+    glTranslatef(0, 0, tower_height)
+    gluDisk(quadric, 0, tower_radius, 20, 1)
+    glPopMatrix()
+    
+    # Right watchtower
+    glPushMatrix()
+    glTranslatef(ARENA_WIDTH, 0, 0)
+    glColor3f(tower_color[0], tower_color[1], tower_color[2])
+    quadric = gluNewQuadric()
+    gluCylinder(quadric, tower_radius, tower_radius, tower_height, 20, 20)
+    # Cap on top
+    glTranslatef(0, 0, tower_height)
+    gluDisk(quadric, 0, tower_radius, 20, 1)
+    glPopMatrix()
+    
+    # Highlight active tower with red glow
+    if phase == "defend" and active_watchtower:
+        glPushMatrix()
+        if active_watchtower == "left":
+            glTranslatef(-ARENA_WIDTH, 0, tower_height - 10)
+        else:
+            glTranslatef(ARENA_WIDTH, 0, tower_height - 10)
+        glColor3f(1.0, 0.0, 0.0)  # Red glow
+        gluSphere(gluNewQuadric(), tower_radius * 0.8, 16, 16)
+        glPopMatrix()
+
+def draw_watchtower_bullet(bullet):
+    """Draw bullet from watchtower"""
+    if bullet is None:
+        return
+    
+    glPushMatrix()
+    glTranslatef(bullet["x"], bullet["y"], bullet["z"])
+    
+    # Calculate direction to face target
+    dx = bullet["target_x"] - bullet["start_x"]
+    dy = bullet["target_y"] - bullet["start_y"]
+    dz = bullet["target_z"] - bullet["start_z"]
+    
+    # Draw as small red sphere
+    glColor3f(1.0, 0.2, 0.0)  # Bright red
+    gluSphere(gluNewQuadric(), 8, 12, 12)
+    
+    # Add trail effect
+    glColor3f(1.0, 0.5, 0.0)  # Orange trail
+    gluSphere(gluNewQuadric(), 5, 8, 8)
+    
+    glPopMatrix()
+
+def draw_danger_zone():
+    """Draw the danger zone square for medium difficulty"""
+    if level != "medium":
+        return
+    
+    # Determine defender's side based on current turn
+    # During attack phase: next turn's player will defend
+    # During defend phase: current opponent is defending
+    if phase == "attack":
+        defender_side_y = 400 if current_turn == 1 else -400
+    else:  # defend phase
+        defender_side_y = 400 if current_turn == 1 else -400
+    
+    # Draw white square on the ground at defender's side (fixed Y position)
+    half_width = danger_zone_width / 2
+    zone_depth = 100  # Depth along Y axis
+    
+    # Main white square
+    glBegin(GL_QUADS)
+    glColor3f(1.0, 1.0, 1.0)  # Pure white for better visibility
+    
+    glVertex3f(danger_zone_x - half_width, defender_side_y - zone_depth/2, 3)
+    glVertex3f(danger_zone_x + half_width, defender_side_y - zone_depth/2, 3)
+    glVertex3f(danger_zone_x + half_width, defender_side_y + zone_depth/2, 3)
+    glVertex3f(danger_zone_x - half_width, defender_side_y + zone_depth/2, 3)
+    glEnd()
 
 def draw_arena():
     """Draw the 3D arena with tennis court style"""
@@ -293,7 +426,7 @@ def draw_player(player):
         min(1, player["color"][2] + 0.3)
     )
     glPushMatrix()
-    glTranslatef(0, 0, 15)
+    glTranslatef(0, 0, 40)
     gluSphere(gluNewQuadric(), 18, 32, 32)
     glPopMatrix()
     
@@ -353,160 +486,222 @@ def draw_crosshair():
     
     glPopMatrix()
 
+def get_projectile_angles(attack, t):
+    """
+    Calculates Yaw (Z-rotation) and Pitch (Y-rotation) to align 
+    projectile with its velocity vector along the arc.
+    """
+    # Look ahead factor (delta t)
+    dt = 0.05
+    future_t = min(1.0, t + dt)
+    
+    # Current Position (Linear XY, Arc Z)
+    cur_x = attack["start_x"] + (attack["target_x"] - attack["start_x"]) * t
+    cur_y = attack["start_y"] + (attack["target_y"] - attack["start_y"]) * t
+    
+    # Future Position
+    fut_x = attack["start_x"] + (attack["target_x"] - attack["start_x"]) * future_t
+    fut_y = attack["start_y"] + (attack["target_y"] - attack["start_y"]) * future_t
+    
+    # Calculate Z height based on attack type
+    if attack["type"] == "signature":
+        # Arc formula: H * sin(pi * t)
+        cur_z = attack["start_z"] + 60 * math.sin(t * math.pi)
+        fut_z = attack["start_z"] + 60 * math.sin(future_t * math.pi)
+    else:
+        cur_z = attack["z"]
+        fut_z = attack["z"]
+    
+    # Velocity Vector components
+    dx = fut_x - cur_x
+    dy = fut_y - cur_y
+    dz = fut_z - cur_z
+    
+    # Calculate Yaw (Angle on ground)
+    # math.atan2(y, x) gives angle from X-axis. 
+    # We convert to degrees.
+    yaw = math.degrees(math.atan2(dy, dx))
+    
+    # Calculate Pitch (Angle from ground up/down)
+    # We need the horizontal magnitude to compare Z against.
+    horiz_dist = math.sqrt(dx*dx + dy*dy)
+    pitch = math.degrees(math.atan2(dz, horiz_dist))
+    
+    return yaw, pitch
+
 def draw_attack(attack):
-    """Draw active attack projectile"""
+    """Draw active attack projectile with NEW projection but OLD aesthetics"""
     if attack is None:
         return
     
     element = attack["element"]
     color = element_colors.get(element, [1, 1, 1])
     
+    # Calculate progress 't' for the angle calculation
+    dx_total = attack["target_x"] - attack["start_x"]
+    dy_total = attack["target_y"] - attack["start_y"]
+    dist_total = math.sqrt(dx_total**2 + dy_total**2)
+    
+    dx_curr = attack["x"] - attack["start_x"]
+    dy_curr = attack["y"] - attack["start_y"]
+    dist_curr = math.sqrt(dx_curr**2 + dy_curr**2)
+    
+    if dist_total > 0:
+        t = dist_curr / dist_total
+    else:
+        t = 0
+        
+    # Get the 3D angles
+    yaw, pitch = get_projectile_angles(attack, t)
+    
     glPushMatrix()
     glTranslatef(attack["x"], attack["y"], attack["z"])
     
+    # --- APPLY NEW PROJECTION ---
+    glRotatef(yaw, 0, 0, 1)      # Face target
+    glRotatef(-pitch, 0, 1, 0)   # Face up/down along arc
+    
+    # --- ALIGNMENT FIX ---
+    # Your original models were drawn pointing along the Y-axis (Up/North).
+    # The math above points along the X-axis (Forward/East).
+    # We rotate -90 degrees on Z to align the models with the direction.
+    glRotatef(-90, 0, 0, 1)
+    
+    # --- ORIGINAL AESTHETICS BELOW ---
+    
     if attack["type"] == "basic":
-        # Stacked horizontal rectangular layers (like reference image)
-        num_layers = 5
-        layer_height = 8
-        layer_width = 50
-        layer_depth = 45
+        # Three triangle-shaped quads, one in front of the other
+        triangle_configs = [
+            {"y_offset": 0, "width": 50, "height": 30, "brightness": 1.0},      # Largest
+            {"y_offset": 35, "width": 38, "height": 22, "brightness": 0.8},     # Medium
+            {"y_offset": 65, "width": 28, "height": 15, "brightness": 0.6}      # Smallest
+        ]
         
-        for i in range(num_layers):
-            z_offset = i * layer_height
-            brightness = 1.0 - (i * 0.15)  # Darker as we go up
-            
+        for config in triangle_configs:
             glPushMatrix()
-            glTranslatef(0, 0, z_offset - (num_layers * layer_height / 2))
+            # Note: We use negative offset here because your original code 
+            # pushed them "back" relative to movement
+            glTranslatef(0, config["y_offset"], 0)
             
-            # Draw rectangular layer
-            glColor3f(color[0] * brightness, color[1] * brightness, color[2] * brightness)
+            tip_y = config["height"]
+            base_y = -config["height"]
+            width = config["width"]
+            thickness = 8
+            
+            glColor3f(color[0] * config["brightness"], color[1] * config["brightness"], color[2] * config["brightness"])
+            
             glBegin(GL_QUADS)
             
             # Top face
-            glVertex3f(-layer_width/2, -layer_depth/2, layer_height/2)
-            glVertex3f(layer_width/2, -layer_depth/2, layer_height/2)
-            glVertex3f(layer_width/2, layer_depth/2, layer_height/2)
-            glVertex3f(-layer_width/2, layer_depth/2, layer_height/2)
+            glVertex3f(0, tip_y, thickness/2)
+            glVertex3f(-width/2, base_y, thickness/2)
+            glVertex3f(width/2, base_y, thickness/2)
+            glVertex3f(0, tip_y, thickness/2)
             
             # Bottom face
-            glVertex3f(-layer_width/2, -layer_depth/2, -layer_height/2)
-            glVertex3f(layer_width/2, -layer_depth/2, -layer_height/2)
-            glVertex3f(layer_width/2, layer_depth/2, -layer_height/2)
-            glVertex3f(-layer_width/2, layer_depth/2, -layer_height/2)
+            glVertex3f(0, tip_y, -thickness/2)
+            glVertex3f(width/2, base_y, -thickness/2)
+            glVertex3f(-width/2, base_y, -thickness/2)
+            glVertex3f(0, tip_y, -thickness/2)
             
             # Front face
-            glVertex3f(-layer_width/2, layer_depth/2, -layer_height/2)
-            glVertex3f(layer_width/2, layer_depth/2, -layer_height/2)
-            glVertex3f(layer_width/2, layer_depth/2, layer_height/2)
-            glVertex3f(-layer_width/2, layer_depth/2, layer_height/2)
+            glVertex3f(0, tip_y, thickness/2)
+            glVertex3f(0, tip_y, -thickness/2)
+            glVertex3f(0, tip_y, -thickness/2)
+            glVertex3f(0, tip_y, thickness/2)
+            
+            # Left side
+            glVertex3f(0, tip_y, thickness/2)
+            glVertex3f(0, tip_y, -thickness/2)
+            glVertex3f(-width/2, base_y, -thickness/2)
+            glVertex3f(-width/2, base_y, thickness/2)
+            
+            # Right side
+            glVertex3f(0, tip_y, thickness/2)
+            glVertex3f(0, tip_y, -thickness/2)
+            glVertex3f(width/2, base_y, -thickness/2)
+            glVertex3f(width/2, base_y, thickness/2)
             
             # Back face
-            glVertex3f(-layer_width/2, -layer_depth/2, -layer_height/2)
-            glVertex3f(layer_width/2, -layer_depth/2, -layer_height/2)
-            glVertex3f(layer_width/2, -layer_depth/2, layer_height/2)
-            glVertex3f(-layer_width/2, -layer_depth/2, layer_height/2)
-            
-            # Left face
-            glVertex3f(-layer_width/2, -layer_depth/2, -layer_height/2)
-            glVertex3f(-layer_width/2, layer_depth/2, -layer_height/2)
-            glVertex3f(-layer_width/2, layer_depth/2, layer_height/2)
-            glVertex3f(-layer_width/2, -layer_depth/2, layer_height/2)
-            
-            # Right face
-            glVertex3f(layer_width/2, -layer_depth/2, -layer_height/2)
-            glVertex3f(layer_width/2, layer_depth/2, -layer_height/2)
-            glVertex3f(layer_width/2, layer_depth/2, layer_height/2)
-            glVertex3f(layer_width/2, -layer_depth/2, layer_height/2)
+            glVertex3f(-width/2, base_y, thickness/2)
+            glVertex3f(width/2, base_y, thickness/2)
+            glVertex3f(width/2, base_y, -thickness/2)
+            glVertex3f(-width/2, base_y, -thickness/2)
             
             glEnd()
             glPopMatrix()
         
     elif attack["type"] == "signature":
-        # Stacked spheres forming a cone/tower (like reference image)
-        num_spheres = 4
-        base_radius = 32
+        # Fireball with spheres in front of one another
+        sphere_configs = [
+            {"y_offset": 0, "radius": 28, "brightness": 1.0},      # Largest (front)
+            {"y_offset": -30, "radius": 24, "brightness": 0.85},   # Medium-large
+            {"y_offset": -55, "radius": 18, "brightness": 0.7},    # Medium-small
+            {"y_offset": -75, "radius": 12, "brightness": 0.55}    # Smallest (back)
+        ]
         
-        for i in range(num_spheres):
-            z_offset = i * 18  # Vertical spacing
-            radius = base_radius - (i * 4)  # Smaller as we go up
-            brightness = 1.0 - (i * 0.1)
-            
+        for config in sphere_configs:
             glPushMatrix()
-            glTranslatef(0, 0, z_offset - 20)
-            glColor3f(color[0] * brightness, color[1] * brightness, color[2] * brightness)
-            gluSphere(gluNewQuadric(), radius, 20, 20)
+            glTranslatef(0, config["y_offset"], 0)
+            glColor3f(color[0] * config["brightness"], color[1] * config["brightness"], color[2] * config["brightness"])
+            gluSphere(gluNewQuadric(), config["radius"], 20, 20)
             glPopMatrix()
         
     elif attack["type"] == "ultimate":
-        # Large expanding ground wave (trapezoid/triangle shape on ground)
-        glTranslatef(0, 0, -attack["z"] + 5)
+        # Three rectangles, one in front of the other
+        rect_configs = [
+            {"y_offset": 0, "width": 180, "depth": 100, "height": 25, "brightness": 1.0},     # Largest
+            {"y_offset": 50, "width": 140, "depth": 80, "height": 20, "brightness": 0.75},    # Medium
+            {"y_offset": 90, "width": 100, "depth": 60, "height": 15, "brightness": 0.5}      # Smallest
+        ]
         
-        # Calculate expansion based on progress
-        expansion = 1.0 + (attack_progress * 0.5)  # Grows as it travels
-        
-        # Determine direction based on attack movement
-        direction = 1 if attack["target_y"] > attack["start_y"] else -1
-        
-        # Main trapezoid body (stacked layers for depth)
-        num_layers = 5
-        layer_height = 6
-        
-        for layer in range(num_layers):
-            z_offset = layer * layer_height
-            brightness = 1.0 - (layer * 0.12)
-            
+        for config in rect_configs:
             glPushMatrix()
-            glTranslatef(0, 0, z_offset)
+            glTranslatef(0, config["y_offset"], 0)
             
-            glColor3f(color[0] * brightness, color[1] * brightness, color[2] * brightness)
+            w = config["width"] / 2
+            d = config["depth"] / 2
+            h = config["height"]
             
-            # Draw trapezoid shape
+            glColor3f(color[0] * config["brightness"], color[1] * config["brightness"], color[2] * config["brightness"])
+            
             glBegin(GL_QUADS)
             
-            # Top face (trapezoid) - oriented correctly based on direction
-            top_width = 80 * expansion
-            bottom_width = 140 * expansion
-            depth = 110 * expansion
-            
-            glVertex3f(-top_width, depth/2 * direction, layer_height)
-            glVertex3f(top_width, depth/2 * direction, layer_height)
-            glVertex3f(bottom_width, -depth/2 * direction, layer_height)
-            glVertex3f(-bottom_width, -depth/2 * direction, layer_height)
+            # Top face
+            glVertex3f(-w, -d, h)
+            glVertex3f(w, -d, h)
+            glVertex3f(w, d, h)
+            glVertex3f(-w, d, h)
             
             # Bottom face
-            glVertex3f(-top_width, depth/2 * direction, 0)
-            glVertex3f(top_width, depth/2 * direction, 0)
-            glVertex3f(bottom_width, -depth/2 * direction, 0)
-            glVertex3f(-bottom_width, -depth/2 * direction, 0)
+            glVertex3f(-w, -d, 0)
+            glVertex3f(w, -d, 0)
+            glVertex3f(w, d, 0)
+            glVertex3f(-w, d, 0)
             
-            glEnd()
+            # Front face
+            glVertex3f(-w, d, 0)
+            glVertex3f(w, d, 0)
+            glVertex3f(w, d, h)
+            glVertex3f(-w, d, h)
             
-            # Side faces
-            glBegin(GL_QUADS)
+            # Back face
+            glVertex3f(-w, -d, 0)
+            glVertex3f(w, -d, 0)
+            glVertex3f(w, -d, h)
+            glVertex3f(-w, -d, h)
             
-            # Front
-            glVertex3f(-top_width, depth/2 * direction, 0)
-            glVertex3f(top_width, depth/2 * direction, 0)
-            glVertex3f(top_width, depth/2 * direction, layer_height)
-            glVertex3f(-top_width, depth/2 * direction, layer_height)
+            # Left face
+            glVertex3f(-w, -d, 0)
+            glVertex3f(-w, d, 0)
+            glVertex3f(-w, d, h)
+            glVertex3f(-w, -d, h)
             
-            # Back
-            glVertex3f(-bottom_width, -depth/2 * direction, 0)
-            glVertex3f(bottom_width, -depth/2 * direction, 0)
-            glVertex3f(bottom_width, -depth/2 * direction, layer_height)
-            glVertex3f(-bottom_width, -depth/2 * direction, layer_height)
-            
-            # Left side
-            glVertex3f(-bottom_width, -depth/2 * direction, 0)
-            glVertex3f(-top_width, depth/2 * direction, 0)
-            glVertex3f(-top_width, depth/2 * direction, layer_height)
-            glVertex3f(-bottom_width, -depth/2 * direction, layer_height)
-            
-            # Right side
-            glVertex3f(bottom_width, -depth/2 * direction, 0)
-            glVertex3f(top_width, depth/2 * direction, 0)
-            glVertex3f(top_width, depth/2 * direction, layer_height)
-            glVertex3f(bottom_width, -depth/2 * direction, layer_height)
+            # Right face
+            glVertex3f(w, -d, 0)
+            glVertex3f(w, d, 0)
+            glVertex3f(w, d, h)
+            glVertex3f(w, -d, h)
             
             glEnd()
             glPopMatrix()
@@ -541,21 +736,46 @@ def fire_attack():
     target_x = crosshair_pos if not cheat_mode else defender["pos"][0]
     target_y = defender["pos"][1]
     
-    # Create attack projectile
+    # Calculate spawn offset distance from player body (spawn in front of middle body)
+    body_radius = 30  # Player body sphere radius
+    spawn_offset = body_radius + 40  # Spawn 40 units in front of body edge
+    
+    # Calculate direction vector from attacker to target
+    dx = target_x - attacker["pos"][0]
+    dy = target_y - attacker["pos"][1]
+    distance = math.sqrt(dx*dx + dy*dy)
+    
+    # Normalize direction
+    if distance > 0:
+        dx /= distance
+        dy /= distance
+    else:
+        # Default direction if target is directly on attacker
+        dy = 1 if current_turn == 1 else -1
+        dx = 0
+    
+    # Calculate spawn position in front of attacker body
+    start_x = float(attacker["pos"][0]) + dx * spawn_offset
+    start_y = float(attacker["pos"][1]) + dy * spawn_offset
+    start_z = 50.0
+    target_z = 50.0
+    
     active_attack = {
         "type": attacker["attack_type"],
-        "x": float(attacker["pos"][0]),
-        "y": float(attacker["pos"][1]),
-        "z": 50.0,
-        "start_x": float(attacker["pos"][0]),
-        "start_y": float(attacker["pos"][1]),
+        "x": start_x,
+        "y": start_y,
+        "z": start_z,
+        "start_x": start_x,
+        "start_y": start_y,
+        "start_z": start_z,
         "target_x": float(target_x),
         "target_y": float(target_y),
+        "target_z": target_z,
         "element": attacker["element"],
-        "speed": 0.8 if attacker["attack_type"] == "ultimate" else 1.2  # Slower for more reaction time
+        "speed": 0.8 if attacker["attack_type"] == "ultimate" else 1.2
     }
     
-    print(f"Attack fired! Type: {attacker['attack_type']}, From: ({attacker['pos'][0]}, {attacker['pos'][1]}), To: ({target_x}, {target_y})")
+    print(f"Attack fired! Type: {attacker['attack_type']}, From: ({start_x:.1f}, {start_y:.1f}), To: ({target_x}, {target_y})")
     
     # Reset timers
     attack_travel_time = 0
@@ -579,6 +799,76 @@ def fire_attack():
     # Switch to defend phase (but don't move attack yet - wait for animation)
     phase = "defend"
     defend_timer = 0
+    
+    # Activate watchtower for hard difficulty
+    if level == "hard":
+        global active_watchtower, watchtower_cooldown
+        active_watchtower = random.choice(["left", "right"])
+        watchtower_cooldown = 2.0  # 2 second delay before first shot
+        print(f"Watchtower activated: {active_watchtower}")
+
+def fire_watchtower_bullet():
+    """Fire bullet from active watchtower at defender and non-active at random position"""
+    global watchtower_bullet, watchtower_bullet_progress, watchtower_bullet2, watchtower_bullet2_progress
+    
+    if level != "hard" or phase != "defend" or active_watchtower is None:
+        return
+    
+    defender = player2 if current_turn == 1 else player1
+    
+    # Determine active tower position (shoots at defender)
+    tower1_x = -ARENA_WIDTH if active_watchtower == "left" else ARENA_WIDTH
+    tower1_y = 0
+    tower1_z = 70  # Near top of tower
+
+    # Determine non-active tower position (shoots at random location)
+    tower2_x = ARENA_WIDTH if active_watchtower == "left" else -ARENA_WIDTH
+    tower2_y = 0    
+    tower2_z = 70  # Near top of tower
+    
+    # Active tower: Target defender's current position
+    target_x = defender["pos"][0]
+    target_y = defender["pos"][1]
+    target_z = defender["pos"][2] + 20  # Aim at center of player
+
+    # Non-active tower: Random target on defender's side
+    target2_x = random.uniform(-ARENA_WIDTH + 50, ARENA_WIDTH - 50)
+    target2_y = defender["pos"][1]  
+    target2_z = 5  # Aim at ground level
+    
+    # Active tower bullet
+    watchtower_bullet = {
+        "x": float(tower1_x),
+        "y": float(tower1_y),
+        "z": float(tower1_z),
+        "start_x": float(tower1_x),
+        "start_y": float(tower1_y),
+        "start_z": float(tower1_z),
+        "target_x": float(target_x),
+        "target_y": float(target_y),
+        "target_z": float(target_z),
+        "speed": 2.0  # Faster than normal attacks
+    }
+
+    # Non-active tower bullet (random direction)
+    watchtower_bullet2 = {
+        "x": float(tower2_x),
+        "y": float(tower2_y),
+        "z": float(tower2_z),
+        "start_x": float(tower2_x),
+        "start_y": float(tower2_y),
+        "start_z": float(tower2_z),
+        "target_x": float(target2_x),
+        "target_y": float(target2_y),
+        "target_z": float(target2_z),
+        "speed": 2.0  # Faster than normal attacks
+    }
+    
+    watchtower_bullet_progress = 0
+    print(f"Active watchtower fired at defender! From: ({tower1_x}, {tower1_y}, {tower1_z}) To: ({target_x:.1f}, {target_y:.1f}, {target_z:.1f})")
+    
+    watchtower_bullet2_progress = 0
+    print(f"Non-active watchtower fired at random! From: ({tower2_x}, {tower2_y}, {tower2_z}) To: ({target2_x:.1f}, {target2_y:.1f}, {target2_z:.1f})")
 
 def update_crosshair(dt):
     """Update crosshair oscillation"""
@@ -627,17 +917,22 @@ def update_attack(dt):
     attack_travel_time += dt
     
     if attack_progress < 1.0:
-        # Interpolate position
+        # Interpolate position linearly (straight line movement)
         t = attack_progress
         attack["x"] = attack["start_x"] + (attack["target_x"] - attack["start_x"]) * t
         attack["y"] = attack["start_y"] + (attack["target_y"] - attack["start_y"]) * t
         
-        # Arc trajectory for basic and signature attacks
-        if attack["type"] != "ultimate":
+        # Different Z behavior based on attack type
+        if attack["type"] == "signature":
+            # Arc trajectory for signature attack
             arc_height = 60 * math.sin(t * math.pi)
-            attack["z"] = 50 + arc_height
+            attack["z"] = attack["start_z"] + arc_height
+        elif attack["type"] == "ultimate":
+            # Ground-level for ultimate
+            attack["z"] = 10.0
         else:
-            attack["z"] = 10  # Ground-level for ultimate
+            # Basic attack stays at constant height
+            attack["z"] = attack["start_z"]
     else:
         # Attack reached target - resolve it
         resolve_attack()
@@ -765,8 +1060,7 @@ def apply_status_damage(player, decrement_rounds=False):
         print(f"FREEZE slow: {player['move_speed']} speed")
     elif player["status"] == "STUN":
         player["move_speed"] = int(base_speed * 0.7)  # Increased from 0.9 to 0.7 (-30% speed)
-    else:
-        player["move_speed"] = base_speed
+    # Note: Don't reset to base_speed here - let danger zone or other mechanics handle it
     
     # Only decrement rounds when specified (at start of new round)
     if decrement_rounds and player["status_rounds"] > 0:
@@ -776,21 +1070,32 @@ def apply_status_damage(player, decrement_rounds=False):
     
     if player["status_rounds"] <= 0:
         player["status"] = None
-        player["move_speed"] = base_speed
+        # Only reset speed if no status effect
+        if player["status"] is None:
+            player["move_speed"] = base_speed
 
 def switch_turn():
     """Switch to other player's turn"""
     global current_turn, phase, attack_timer, round_number
+    global active_watchtower, watchtower_bullet, watchtower_bullet2, watchtower_cooldown
     
     current_turn = 2 if current_turn == 1 else 1
     phase = "attack"
     attack_timer = 0
+    
+    # Reset watchtower
+    active_watchtower = None
+    watchtower_bullet = None
+    watchtower_bullet2 = None
+    watchtower_cooldown = 0
     
     # Track if this is the start of a new round
     is_new_round = False
     if current_turn == 1:
         round_number += 1
         is_new_round = True
+        # Randomize danger zone position for new round in medium difficulty
+        randomize_danger_zone()
     
     # Apply per-round stamina
     player1["st"] = min(100, player1["st"] + 5)
@@ -837,7 +1142,7 @@ def parry_attack():
 
 def keyboardListener(key, x, y):
     """Handle keyboard input"""
-    global pause, cheat_mode, game_state, camera_mode
+    global pause, cheat_mode, game_state, camera_mode, current_turn, level
     
     if key == b'p':
         pause = not pause
@@ -870,7 +1175,20 @@ def keyboardListener(key, x, y):
             elif player2["element"] is None:
                 player2["element"] = element_codes[idx]
                 player2["color"] = element_colors[element_codes[idx]]
-                initialize_game()
+                game_state = "level_select"
+        return
+    
+    # Level selection
+    if game_state == "level_select":
+        if key == b'1':
+            level = "easy"
+            initialize_game()
+        elif key == b'2':
+            level = "medium"
+            initialize_game()
+        elif key == b'3':
+            level = "hard"
+            initialize_game()
         return
     
     if game_state != "playing":
@@ -940,7 +1258,7 @@ def keyboardListener(key, x, y):
         elif key == b'e':  # Jump key changed to 'e'
             # Jump
             if defender["jump_height"] == 0:
-                defender["jump_height"] = 100
+                defender["vel"] = 600
         elif key == b'q':
             # Parry
             parry_attack()
@@ -1031,7 +1349,19 @@ def idle():
     # Cap delta time to prevent huge jumps
     if dt > 0.1:
         dt = 0.1
-    
+    # Gravity logic
+    if game_state == "playing" and not pause:
+        gravity = 1500
+        for p in [player1, player2]:
+            # Apply physics if player is in the air or moving up
+            if p["jump_height"] > 0 or p["vel"] != 0:
+                p["jump_height"] += p["vel"] * dt  # Move
+                p["vel"] -= gravity * dt           # Gravity
+                
+                # Land on ground
+                if p["jump_height"] <= 0:
+                    p["jump_height"] = 0
+                    p["vel"] = 0
     # Update camera animation
     if camera_animating:
         camera_anim_progress += dt / camera_anim_duration
@@ -1065,10 +1395,106 @@ def idle():
             update_attack(dt)
         defend_timer += dt
         
-        # Update jump animation
+        # Update jump animation and danger zone effects
         defender = player2 if current_turn == 1 else player1
         if defender["jump_height"] > 0:
             defender["jump_height"] = max(0, defender["jump_height"] - 300 * dt)
+        
+        # Watchtower mechanics (hard difficulty)
+        if level == "hard":
+            global watchtower_cooldown, watchtower_bullet, watchtower_bullet_progress, watchtower_bullet2, watchtower_bullet2_progress
+            
+            # Cooldown before shooting
+            if watchtower_cooldown > 0:
+                watchtower_cooldown -= dt
+                if watchtower_cooldown <= 0 and watchtower_bullet is None:
+                    fire_watchtower_bullet()
+            
+            # Update bullet 1 movement (active tower - targets defender)
+            if watchtower_bullet is not None:
+                watchtower_bullet_progress += dt * watchtower_bullet["speed"]
+                
+                if watchtower_bullet_progress < 1.0:
+                    # Interpolate position
+                    t = watchtower_bullet_progress
+                    watchtower_bullet["x"] = watchtower_bullet["start_x"] + (watchtower_bullet["target_x"] - watchtower_bullet["start_x"]) * t
+                    watchtower_bullet["y"] = watchtower_bullet["start_y"] + (watchtower_bullet["target_y"] - watchtower_bullet["start_y"]) * t
+                    watchtower_bullet["z"] = watchtower_bullet["start_z"] + (watchtower_bullet["target_z"] - watchtower_bullet["start_z"]) * t
+                else:
+                    # Bullet reached target - check hit
+                    hit_distance = math.sqrt(
+                        (watchtower_bullet["target_x"] - defender["pos"][0])**2 +
+                        (watchtower_bullet["target_y"] - defender["pos"][1])**2
+                    )
+                    
+                    if hit_distance < 50:  # Hit if within 50 units
+                        defender["hp"] = max(0, defender["hp"] - 10)
+                        print(f"Active watchtower hit! Damage: 10, HP: {defender['hp']}")
+                    else:
+                        print(f"Active watchtower missed! Distance: {hit_distance:.1f}")
+                    
+                    watchtower_bullet = None
+                    watchtower_cooldown = 3.0  # 3 second cooldown before next shot
+            
+            # Update bullet 2 movement (non-active tower - random direction)
+            if watchtower_bullet2 is not None:
+                watchtower_bullet2_progress += dt * watchtower_bullet2["speed"]
+                
+                if watchtower_bullet2_progress < 1.0:
+                    # Interpolate position
+                    t = watchtower_bullet2_progress
+                    watchtower_bullet2["x"] = watchtower_bullet2["start_x"] + (watchtower_bullet2["target_x"] - watchtower_bullet2["start_x"]) * t
+                    watchtower_bullet2["y"] = watchtower_bullet2["start_y"] + (watchtower_bullet2["target_y"] - watchtower_bullet2["start_y"]) * t
+                    watchtower_bullet2["z"] = watchtower_bullet2["start_z"] + (watchtower_bullet2["target_z"] - watchtower_bullet2["start_z"]) * t
+                else:
+                    # Bullet reached target - check if it hit defender by chance
+                    hit_distance = math.sqrt(
+                        (watchtower_bullet2["target_x"] - defender["pos"][0])**2 +
+                        (watchtower_bullet2["target_y"] - defender["pos"][1])**2
+                    )
+                    
+                    if hit_distance < 50:  # Lucky hit if within 50 units
+                        defender["hp"] = max(0, defender["hp"] - 10)
+                        print(f"Non-active watchtower lucky hit! Damage: 10, HP: {defender['hp']}")
+                    else:
+                        print(f"Non-active watchtower missed (as expected).")
+                    
+                    watchtower_bullet2 = None
+        
+        # Check danger zone (medium difficulty)
+        if level == "medium":
+            half_width = danger_zone_width / 2
+            in_danger_zone = (danger_zone_x - half_width <= defender["pos"][0] <= danger_zone_x + half_width)
+            
+            if in_danger_zone:
+                # Apply speed reduction (70% slower)
+                base_speed = 40
+                if defender["status"] == "FRIZ":
+                    defender["move_speed"] = int(base_speed * 0.4 * 0.1)  # Combine with freeze
+                elif defender["status"] == "STUN":
+                    defender["move_speed"] = int(base_speed * 0.7 * 0.1)  # Combine with stun
+                else:
+                    defender["move_speed"] = int(base_speed * 0.1)  # 70% reduction
+                
+                # Track time in danger zone and drain HP
+                global danger_zone_timer
+                danger_zone_timer += dt
+                
+                if danger_zone_timer >= 1.0:
+                    defender["hp"] = max(0, defender["hp"] - 1)
+                    danger_zone_timer -= 1.0  # Subtract 1 second instead of reset to accumulate remainder
+                    print(f"Danger zone damage! HP: {defender['hp']}")
+            else:
+                # Reset timer and speed when outside danger zone
+                danger_zone_timer = 0
+                # Restore speed based on status effects only
+                base_speed = 40
+                if defender["status"] == "FRIZ":
+                    defender["move_speed"] = int(base_speed * 0.4)
+                elif defender["status"] == "STUN":
+                    defender["move_speed"] = int(base_speed * 0.7)
+                elif defender["status"] is None:
+                    defender["move_speed"] = base_speed
     
     glutPostRedisplay()
 
@@ -1083,7 +1509,7 @@ def showScreen():
         draw_text(380, 450, "POSITRON", GLUT_BITMAP_TIMES_ROMAN_24)
         draw_text(300, 380, "3D Turn-Based Battle", GLUT_BITMAP_HELVETICA_18)
         draw_text(320, 320, "Press ENTER to Start", GLUT_BITMAP_HELVETICA_18)
-        draw_text(200, 200, "Controls: A/D-Move  1/2/3-Attack  SPACE-Fire  Q-Parry  J-Jump", GLUT_BITMAP_HELVETICA_12)
+        draw_text(200, 200, "Controls: A/D-Move  1/2/3-Attack  SPACE-Fire  Q-Parry  E-Jump", GLUT_BITMAP_HELVETICA_12)
     
     elif game_state == "element_select":
         glClearColor(0.0, 0.0, 0.0, 1)  # Black background
@@ -1101,11 +1527,31 @@ def showScreen():
             glColor3f(player2["color"][0], player2["color"][1], player2["color"][2])
             draw_text(300, y_pos, f"Player 2: {element_names[player2['element']]}", GLUT_BITMAP_HELVETICA_18)
     
+    elif game_state == "level_select":
+        glClearColor(0.0, 0.0, 0.0, 1)  # Black background
+        draw_text(340, 700, "SELECT DIFFICULTY", GLUT_BITMAP_TIMES_ROMAN_24)
+        
+        glColor3f(0.5, 1.0, 0.5)  # Light green
+        draw_text(300, 550, "1 - EASY (Normal mode)", GLUT_BITMAP_HELVETICA_18)
+        
+        glColor3f(1.0, 1.0, 0.5)  # Yellow
+        draw_text(300, 500, "2 - MEDIUM (Danger zones)", GLUT_BITMAP_HELVETICA_18)
+        
+        glColor3f(1.0, 0.3, 0.3)  # Red
+        draw_text(300, 450, "3 - HARD (Watchtower snipers)", GLUT_BITMAP_HELVETICA_18)
+        
+        glColor3f(1, 1, 1)
+        draw_text(200, 350, "Medium: White danger zones appear during defense.", GLUT_BITMAP_HELVETICA_12)
+        draw_text(200, 325, "         Standing inside reduces speed by 70% and drains 1 HP/sec.", GLUT_BITMAP_HELVETICA_12)
+        draw_text(200, 300, "Hard:   Watchtowers shoot at defender. Each hit deals 10 damage.", GLUT_BITMAP_HELVETICA_12)
+    
     elif game_state == "playing":
         glClearColor(0.0, 0.0, 0.0, 1)  # Black background
         setupCamera()
         
         draw_arena()
+        draw_danger_zone()
+        draw_watchtowers()
         draw_player(player1)
         draw_player(player2)
         
@@ -1114,6 +1560,12 @@ def showScreen():
         
         if active_attack:
             draw_attack(active_attack)
+        
+        if watchtower_bullet:
+            draw_watchtower_bullet(watchtower_bullet)
+        
+        if watchtower_bullet2:
+            draw_watchtower_bullet(watchtower_bullet2)
         
         # Left panel - Player 1 (Red side)
         glColor3f(1, 0, 0)  # Red border
@@ -1184,9 +1636,7 @@ def main():
     glutCreateWindow(b"Positron - 3D Turn-Based Battle")
     
     glEnable(GL_DEPTH_TEST)
-    glEnable(GL_BLEND)
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-    
+  
     glutDisplayFunc(showScreen)
     glutKeyboardFunc(keyboardListener)
     glutSpecialFunc(specialKeyListener)
